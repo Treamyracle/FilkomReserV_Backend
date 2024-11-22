@@ -80,7 +80,39 @@ var rooms = []Room{
 }
 
 // In-memory storage untuk notifikasi
-var notifications = []Notification{}
+// In-memory storage untuk notifikasi
+var notifications = []Notification{
+	{
+		ID:          1,
+		RoomID:      1,
+		BorrowDate:  "2024-10-12",
+		StartTime:   "14:00",
+		EndTime:     "16:00",
+		Status:      "diterima",
+		File:        "contract1.pdf",
+		Description: "Peminjaman untuk seminar teknologi",
+	},
+	{
+		ID:          2,
+		RoomID:      2,
+		BorrowDate:  "2024-10-13",
+		StartTime:   "09:00",
+		EndTime:     "11:00",
+		Status:      "proses",
+		File:        "",
+		Description: "Penggunaan ruangan untuk pertemuan organisasi",
+	},
+	{
+		ID:          3,
+		RoomID:      1,
+		BorrowDate:  "2024-10-14",
+		StartTime:   "10:00",
+		EndTime:     "12:00",
+		Status:      "ditolak",
+		File:        "presentation_slides.pdf",
+		Description: "Kegiatan workshop desain grafis",
+	},
+}
 
 // Endpoint untuk mendapatkan semua notifikasi
 func getNotifications(c *gin.Context) {
