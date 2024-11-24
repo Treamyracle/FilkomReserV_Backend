@@ -283,5 +283,6 @@ func main() {
 	r.GET("/notifications", getNotifications)
 	r.GET("/notifications-with-name", GetNotificationsWithRoomName)
 
-	r.Run(":8080")
+	r.Run(":3000")
+
 }
