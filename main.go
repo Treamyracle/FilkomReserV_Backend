@@ -1,4 +1,4 @@
-package main
+package handler
 
 import (
 	"net/http"
@@ -8,9 +8,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Data structures for the app
 type NotificationWithRoom struct {
 	ID          uint   `json:"id"`
-	RoomName    string `json:"room_name"` // Ganti room_id dengan room_name
+	RoomName    string `json:"room_name"`
 	BorrowDate  string `json:"borrow_date"`
 	StartTime   string `json:"start_time"`
 	EndTime     string `json:"end_time"`
@@ -30,26 +31,24 @@ type Notification struct {
 	Description string `json:"description" form:"description"`
 }
 
-// Struktur data untuk ruangan
 type Room struct {
 	ID           uint       `json:"id"`
 	Name         string     `json:"name"`
 	Capacity     int        `json:"capacity"`
 	Description  string     `json:"description"`
 	ImageURL     string     `json:"image_url"`
-	Availability []TimeSlot `json:"availability"`  // Availability slots
-	Facilities   []string   `json:"facilities"`    // Daftar fasilitas
-	UsageHistory []string   `json:"usage_history"` // Riwayat penggunaan
+	Availability []TimeSlot `json:"availability"`
+	Facilities   []string   `json:"facilities"`
+	UsageHistory []string   `json:"usage_history"`
 }
 
-// Struktur data untuk waktu tersedia
 type TimeSlot struct {
-	Date      string `json:"date"`       // Tanggal
-	StartTime string `json:"start_time"` // Jam mulai
-	EndTime   string `json:"end_time"`   // Jam selesai
+	Date      string `json:"date"`
+	StartTime string `json:"start_time"`
+	EndTime   string `json:"end_time"`
 }
 
-// In-memory storage for rooms
+// In-memory storage for rooms and notifications
 var rooms = []Room{
 	{ID: 1, Name: "GKM", Capacity: 100, Description: "Gedung Kreativitas Bersama FILKOM UB", ImageURL: "https://cdn.pixabay.com/photo/2017/03/28/12/17/chairs-2181994_1280.jpg",
 		Facilities:   []string{"Videotron", "Ac Central", "Kursi", "Lampu Sorot", "Audio", "Panggung"},
@@ -67,7 +66,6 @@ var rooms = []Room{
 		}},
 }
 
-// In-memory storage untuk notifikasi
 var notifications = []Notification{
 	{
 		ID:          1,
@@ -89,29 +87,55 @@ var notifications = []Notification{
 		File:        "",
 		Description: "Penggunaan ruangan untuk pertemuan organisasi",
 	},
-	{
-		ID:          3,
-		RoomID:      1,
-		BorrowDate:  "2024-10-14",
-		StartTime:   "10:00",
-		EndTime:     "12:00",
-		Status:      "ditolak",
-		File:        "presentation_slides.pdf",
-		Description: "Kegiatan workshop desain grafis",
-	},
 }
 
-// Endpoint untuk mendapatkan semua notifikasi
-func getNotifications(c *gin.Context) {
-	c.JSON(http.StatusOK, notifications)
+// The main handler for Vercel (serverless)
+func Handler(w http.ResponseWriter, r *http.Request) {
+	// Set Gin mode
+	gin.SetMode(gin.ReleaseMode)
+
+	// Create Gin router
+	router := gin.Default()
+
+	// Use CORS middleware
+	router.Use(cors.Default())
+
+	// Routes
+	router.GET("/rooms", getRooms)
+	router.GET("/rooms/:id", getRoomByID)
+	router.POST("/rooms", addRoom)
+	router.POST("/rooms/:id/availability", addAvailability)
+	router.PUT("/rooms/:id/availability", updateRoomAvailability)
+	router.POST("/notifications", addNotification)
+	router.GET("/notifications", getNotifications)
+	router.GET("/notifications-with-name", GetNotificationsWithRoomName)
+
+	// Run Gin router to handle the request
+	router.ServeHTTP(w, r)
 }
 
-// Endpoint untuk mendapatkan semua ruangan
+// Handler functions (such as getRooms, getRoomByID, etc.) go here...
+
 func getRooms(c *gin.Context) {
 	c.JSON(http.StatusOK, rooms)
 }
 
-// Endpoint untuk menambah ruangan baru
+func getRoomByID(c *gin.Context) {
+	idParam := c.Param("id")
+	id, err := strconv.Atoi(idParam)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid room ID"})
+		return
+	}
+	for _, room := range rooms {
+		if room.ID == uint(id) {
+			c.JSON(http.StatusOK, room)
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+}
+
 func addRoom(c *gin.Context) {
 	var newRoom Room
 	if err := c.ShouldBindJSON(&newRoom); err != nil {
@@ -119,13 +143,13 @@ func addRoom(c *gin.Context) {
 		return
 	}
 
+	// Add the new room to the in-memory storage
 	newRoom.ID = uint(len(rooms) + 1)
 	rooms = append(rooms, newRoom)
 
 	c.JSON(http.StatusOK, newRoom)
 }
 
-// Endpoint untuk menambah slot waktu tersedia ke ruangan
 func addAvailability(c *gin.Context) {
 	idParam := c.Param("id")
 	id, err := strconv.Atoi(idParam)
@@ -152,7 +176,6 @@ func addAvailability(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
 }
 
-// Endpoint untuk mengubah status ketersediaan ruangan berdasarkan waktu
 func updateRoomAvailability(c *gin.Context) {
 	idParam := c.Param("id")
 	id, err := strconv.Atoi(idParam)
@@ -168,6 +191,7 @@ func updateRoomAvailability(c *gin.Context) {
 	// Find the room by ID and update availability
 	for i, room := range rooms {
 		if room.ID == uint(id) {
+			// Find and toggle the availability based on date and time
 			for j, slot := range room.Availability {
 				if slot.Date == date && slot.StartTime == startTime && slot.EndTime == endTime {
 					rooms[i].Availability = append(rooms[i].Availability[:j], rooms[i].Availability[j+1:]...)
@@ -175,6 +199,8 @@ func updateRoomAvailability(c *gin.Context) {
 					return
 				}
 			}
+
+			// If the time slot wasn't found, add it
 			rooms[i].Availability = append(rooms[i].Availability, TimeSlot{Date: date, StartTime: startTime, EndTime: endTime})
 			c.JSON(http.StatusOK, gin.H{"message": "Room availability added successfully"})
 			return
@@ -184,29 +210,8 @@ func updateRoomAvailability(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
 }
 
-// Endpoint untuk mendapatkan data ruangan berdasarkan ID
-func getRoomByID(c *gin.Context) {
-	idParam := c.Param("id")
-	id, err := strconv.Atoi(idParam)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid room ID"})
-		return
-	}
-
-	for _, room := range rooms {
-		if room.ID == uint(id) {
-			c.JSON(http.StatusOK, room)
-			return
-		}
-	}
-
-	c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
-}
-
-// Endpoint untuk menambah notifikasi baru
 func addNotification(c *gin.Context) {
 	var newNotification Notification
-
 	if err := c.ShouldBind(&newNotification); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to bind form data: " + err.Error()})
 		return
@@ -233,56 +238,32 @@ func addNotification(c *gin.Context) {
 	newNotification.ID = uint(len(notifications) + 1)
 	notifications = append(notifications, newNotification)
 
-	c.JSON(http.StatusOK, gin.H{
-		"message":      "Notification added successfully",
-		"notification": newNotification,
-	})
+	c.JSON(http.StatusOK, gin.H{"message": "Notification added successfully", "notification": newNotification})
 }
 
-// Endpoint untuk mendapatkan semua notifikasi dengan nama ruangan
+func getNotifications(c *gin.Context) {
+	c.JSON(http.StatusOK, notifications)
+}
+
 func GetNotificationsWithRoomName(c *gin.Context) {
-	result := GetNotificationsWithRoom(notifications, rooms)
-	c.JSON(http.StatusOK, result)
-}
-
-func GetNotificationsWithRoom(notifications []Notification, rooms []Room) []NotificationWithRoom {
-	roomMap := make(map[uint]string)
-	for _, room := range rooms {
-		roomMap[room.ID] = room.Name
-	}
-
 	var result []NotificationWithRoom
+
 	for _, notif := range notifications {
-		roomName := roomMap[notif.RoomID]
-		result = append(result, NotificationWithRoom{
-			ID:          notif.ID,
-			RoomName:    roomName,
-			BorrowDate:  notif.BorrowDate,
-			StartTime:   notif.StartTime,
-			EndTime:     notif.EndTime,
-			Status:      notif.Status,
-			File:        notif.File,
-			Description: notif.Description,
-		})
+		for _, room := range rooms {
+			if room.ID == notif.RoomID {
+				result = append(result, NotificationWithRoom{
+					ID:          notif.ID,
+					RoomName:    room.Name,
+					BorrowDate:  notif.BorrowDate,
+					StartTime:   notif.StartTime,
+					EndTime:     notif.EndTime,
+					Status:      notif.Status,
+					File:        notif.File,
+					Description: notif.Description,
+				})
+			}
+		}
 	}
-	return result
-}
 
-func main() {
-	r := gin.Default()
-
-	r.Use(cors.Default()) // Gunakan middleware default CORS dari gin-contrib
-
-	r.GET("/rooms", getRooms)
-	r.GET("/rooms/:id", getRoomByID)
-	r.POST("/rooms", addRoom)
-	r.POST("/rooms/:id/availability", addAvailability)
-	r.PUT("/rooms/:id/availability", updateRoomAvailability)
-
-	r.POST("/notifications", addNotification)
-	r.GET("/notifications", getNotifications)
-	r.GET("/notifications-with-name", GetNotificationsWithRoomName)
-
-	r.Run(":3000")
-
+	c.JSON(http.StatusOK, result)
 }
