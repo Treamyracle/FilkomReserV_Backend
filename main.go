@@ -8,17 +8,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// Struktur data untuk Notifikasi
-// type Notification struct {
-// 	ID          uint   `json:"id" gorm:"primary_key"`
-// 	RoomID      uint   `json:"room_id"`     // Foreign Key untuk Ruangan
-// 	BorrowDate  string `json:"borrow_date"` // Tanggal peminjaman
-// 	StartTime   string `json:"start_time"`  // Waktu mulai peminjaman
-// 	EndTime     string `json:"end_time"`    // Waktu akhir peminjaman
-// 	Status      string `json:"status"`      // Status (proses, diterima, ditolak)
-// 	File        string `json:"file"`        // Nama atau path file (kosong jika tidak ada file)
-// 	Description string `json:"description"` // Deskripsi tambahan untuk notifikasi
-// }
+type NotificationWithRoom struct {
+	ID          uint   `json:"id"`
+	RoomName    string `json:"room_name"` // Ganti room_id dengan room_name
+	BorrowDate  string `json:"borrow_date"`
+	StartTime   string `json:"start_time"`
+	EndTime     string `json:"end_time"`
+	Status      string `json:"status"`
+	File        string `json:"file"`
+	Description string `json:"description"`
+}
 
 type Notification struct {
 	ID          uint   `json:"id" form:"id"`
@@ -30,17 +29,6 @@ type Notification struct {
 	File        string `json:"file" form:"file"`
 	Description string `json:"description" form:"description"`
 }
-
-// type Notification struct {
-// 	ID          uint   `json:"id" gorm:"primary_key"`
-// 	RoomID      int    `json:"room_id" gorm:"not null"` // Jangan lupa menambahkan gorm tag untuk validasi database
-// 	BorrowDate  string `json:"borrow_date" form:"borrow_date"`
-// 	StartTime   string `json:"start_time" form:"start_time"`
-// 	EndTime     string `json:"end_time" form:"end_time"`
-// 	Status      string `json:"status" form:"status"`
-// 	File        string `json:"file" form:"file"`
-// 	Description string `json:"description" form:"description"`
-// }
 
 // Struktur data untuk ruangan
 type Room struct {
@@ -274,6 +262,36 @@ func addNotification(c *gin.Context) {
 	})
 }
 
+// Endpoint untuk mendapatkan semua notifikasi dengan nama ruangan
+func GetNotificationsWithRoomName(c *gin.Context) {
+	// Get notifications with room names
+	result := GetNotificationsWithRoom(notifications, rooms)
+	c.JSON(http.StatusOK, result)
+}
+
+func GetNotificationsWithRoom(notifications []Notification, rooms []Room) []NotificationWithRoom {
+	roomMap := make(map[uint]string)
+	for _, room := range rooms {
+		roomMap[room.ID] = room.Name
+	}
+
+	var result []NotificationWithRoom
+	for _, notif := range notifications {
+		roomName := roomMap[notif.RoomID]
+		result = append(result, NotificationWithRoom{
+			ID:          notif.ID,
+			RoomName:    roomName,
+			BorrowDate:  notif.BorrowDate,
+			StartTime:   notif.StartTime,
+			EndTime:     notif.EndTime,
+			Status:      notif.Status,
+			File:        notif.File,
+			Description: notif.Description,
+		})
+	}
+	return result
+}
+
 func main() {
 	r := gin.Default()
 
@@ -291,6 +309,8 @@ func main() {
 
 	// Endpoint untuk mendapatkan semua notifikasi
 	r.GET("/notifications", getNotifications)
+
+	r.GET("/notifications-with-name", GetNotificationsWithRoomName)
 
 	// Run server on port 8080
 	r.Run(":8080")
