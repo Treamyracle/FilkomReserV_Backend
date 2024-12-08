@@ -122,6 +122,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}))
 
 	// Routes
+	router.POST("/login", LoginHandler)
 	auth := router.Group("/")
 	auth.Use(JWTAuthMiddleware()) // Gunakan middleware JWT setelah CORS
 	auth.GET("/rooms", getRooms)
