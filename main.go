@@ -2,11 +2,19 @@ package handler
 
 import (
 	"net/http"
+	"os"
 	"strconv"
+	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v4"
 )
+
+type LoginInput struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
 
 // Data structures for the app
 type NotificationWithRoom struct {
@@ -21,14 +29,15 @@ type NotificationWithRoom struct {
 }
 
 type Notification struct {
-	ID          uint   `json:"id" form:"id"`
-	RoomID      uint   `json:"room_id" form:"room_id"`
+	ID          uint   `json:"id" form:"id"`           // ID notifikasi
+	RoomID      uint   `json:"room_id" form:"room_id"` // ID ruangan
 	BorrowDate  string `json:"borrow_date" form:"borrow_date"`
 	StartTime   string `json:"start_time" form:"start_time"`
 	EndTime     string `json:"end_time" form:"end_time"`
 	Status      string `json:"status" form:"status"`
 	File        string `json:"file" form:"file"`
 	Description string `json:"description" form:"description"`
+	Username    string `json:"username" form:"username"` // Menambahkan username
 }
 
 type Room struct {
@@ -89,6 +98,13 @@ var notifications = []Notification{
 	},
 }
 
+var jwtSecretKey = []byte(os.Getenv("JWT_SECRET"))
+
+var users = map[string]string{
+	"admin": "password123",
+	"user":  "password456",
+}
+
 // The main handler for Vercel (serverless)
 func Handler(w http.ResponseWriter, r *http.Request) {
 	// Set Gin mode
@@ -98,20 +114,119 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	router := gin.Default()
 
 	// Use CORS middleware
-	router.Use(cors.Default())
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://127.0.0.1:5500"},                   // Origin yang diizinkan
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},            // Metode yang diizinkan
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"}, // Header yang diizinkan
+		AllowCredentials: true,                                                // Jika kamu membutuhkan cookie atau otentikasi
+	}))
 
 	// Routes
-	router.GET("/rooms", getRooms)
-	router.GET("/rooms/:id", getRoomByID)
-	router.POST("/rooms", addRoom)
-	router.POST("/rooms/:id/availability", addAvailability)
-	router.PUT("/rooms/:id/availability", updateRoomAvailability)
-	router.POST("/notifications", addNotification)
-	router.GET("/notifications", getNotifications)
-	router.GET("/notifications-with-name", GetNotificationsWithRoomName)
+	auth := router.Group("/")
+	auth.Use(JWTAuthMiddleware()) // Gunakan middleware JWT setelah CORS
+	auth.GET("/rooms", getRooms)
+	auth.GET("/rooms/:id", getRoomByID)
+	auth.POST("/rooms", addRoom)
+	auth.POST("/rooms/:id/availability", addAvailability)
+	auth.PUT("/rooms/:id/availability", updateRoomAvailability)
+	auth.POST("/notifications", addNotification)
+	auth.GET("/notifications", getNotifications)
+	auth.GET("/notifications-with-name", GetNotificationsWithRoomName)
+
+	router.POST("/logout", LogoutHandler)
 
 	// Run Gin router to handle the request
 	router.ServeHTTP(w, r)
+}
+
+// LogoutHandler handles logout requests and removes the JWT cookie
+func LogoutHandler(c *gin.Context) {
+	// Remove the Authorization cookie by setting it with an expired time
+	c.SetCookie("Authorization", "", -1, "/", "", false, true)
+	c.JSON(http.StatusOK, gin.H{"message": "Logout successful"})
+}
+
+// JWTAuthMiddleware authenticates requests using the JWT in cookies
+func JWTAuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Read token from the Authorization header
+		tokenString := c.GetHeader("Authorization")
+		if tokenString == "" {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authentication token required"})
+			c.Abort()
+			return
+		}
+
+		// Remove the "Bearer " prefix if it exists
+		if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+			tokenString = tokenString[7:]
+		}
+
+		// Parse and validate the token
+		token, err := jwt.Parse(tokenString, func(token *jwt.Token) (interface{}, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
+			return jwtSecretKey, nil
+		})
+
+		if err != nil || !token.Valid {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
+			c.Abort()
+			return
+		}
+
+		// Store username in context
+		claims, _ := token.Claims.(jwt.MapClaims)
+		c.Set("username", claims["username"])
+
+		c.Next()
+	}
+}
+
+// GenerateJWT generates a JWT token
+func GenerateJWT(username string) (string, error) {
+	claims := jwt.MapClaims{
+		"username": username,
+		"exp":      time.Now().Add(time.Hour * 24).Unix(), // Token valid for 24 hours
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtSecretKey)
+}
+
+// LoginHandler handles login requests
+// LoginHandler handles login requests and sets JWT in a cookie
+// LoginHandler handles login requests and sets JWT in a cookie
+func LoginHandler(c *gin.Context) {
+	var input LoginInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate credentials
+	if password, ok := users[input.Username]; !ok || password != input.Password {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
+		return
+	}
+
+	// Generate JWT
+	token, err := GenerateJWT(input.Username)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Could not generate token"})
+		return
+	}
+
+	// Set JWT as a cookie
+	c.SetCookie("Authorization", token, 3600, "/", "", true, false) // SameSite=None, Secure=false (untuk localhost)
+
+	// Return response with username and user_id (assuming user_id is their username for now)
+	c.JSON(http.StatusOK, gin.H{
+		"message":  "Login successful",
+		"username": input.Username,
+		"token":    token,
+	})
 }
 
 // Handler functions (such as getRooms, getRoomByID, etc.) go here...
@@ -212,32 +327,50 @@ func updateRoomAvailability(c *gin.Context) {
 
 func addNotification(c *gin.Context) {
 	var newNotification Notification
+	// Bind form data ke struct Notification
 	if err := c.ShouldBind(&newNotification); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to bind form data: " + err.Error()})
 		return
 	}
 
-	if newNotification.RoomID == 0 {
+	// Pastikan field yang diperlukan ada
+	if newNotification.RoomID == 0 || newNotification.BorrowDate == "" || newNotification.StartTime == "" || newNotification.EndTime == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Field room_id, borrow_date, start_time, and end_time are required"})
 		return
 	}
 
+	// Ambil username dari konteks
+	username, _ := c.Get("username")
+	if username == nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	// Set username pada notifikasi
+	newNotification.Username = username.(string)
+
+	// Proses file jika ada
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
 		newNotification.File = ""
 	} else {
 		defer file.Close()
+		// Simpan file dan tentukan path file
 		filePath := "path_to_saved_file"
 		newNotification.File = filePath
 	}
 
+	// Tentukan status default jika tidak ada
 	if newNotification.Status == "" {
 		newNotification.Status = "proses"
 	}
 
+	// Tambahkan ID pada notifikasi baru
 	newNotification.ID = uint(len(notifications) + 1)
+	// Simpan notifikasi
 	notifications = append(notifications, newNotification)
 
+	// Kembalikan respons
 	c.JSON(http.StatusOK, gin.H{"message": "Notification added successfully", "notification": newNotification})
 }
 
@@ -248,9 +381,11 @@ func getNotifications(c *gin.Context) {
 func GetNotificationsWithRoomName(c *gin.Context) {
 	var result []NotificationWithRoom
 
+	// Loop through each notification and find corresponding room details
 	for _, notif := range notifications {
 		for _, room := range rooms {
 			if room.ID == notif.RoomID {
+				// Map the notification to include room name and other details
 				result = append(result, NotificationWithRoom{
 					ID:          notif.ID,
 					RoomName:    room.Name,
@@ -265,5 +400,6 @@ func GetNotificationsWithRoomName(c *gin.Context) {
 		}
 	}
 
+	// Return the result with room names included
 	c.JSON(http.StatusOK, result)
 }
