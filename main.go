@@ -115,10 +115,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	// Use CORS middleware
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"https://projek-akhir-aps-fix.vercel.app/"}, // Origin yang diizinkan
-		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},             // Metode yang diizinkan
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},  // Header yang diizinkan
-		AllowCredentials: true,                                                 // Jika kamu membutuhkan cookie atau otentikasi
+		AllowOrigins:     []string{"https://projek-akhir-aps-fix.vercel.app"}, // Origin yang diizinkan
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE"},            // Metode yang diizinkan
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"}, // Header yang diizinkan
+		AllowCredentials: true,                                                // Jika kamu membutuhkan cookie atau otentikasi
 	}))
 
 	// Routes
