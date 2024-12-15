@@ -14,6 +14,7 @@ import (
 type LoginInput struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
+	Role     string `json:"role"`
 }
 
 // Data structures for the app
@@ -55,6 +56,11 @@ type TimeSlot struct {
 	Date      string `json:"date"`
 	StartTime string `json:"start_time"`
 	EndTime   string `json:"end_time"`
+}
+
+type UpdateStatusRequest struct {
+	ID     uint   `json:"id"`
+	Status string `json:"status"`
 }
 
 // In-memory storage for rooms and notifications
@@ -213,34 +219,13 @@ var rooms = []Room{
 	},
 }
 
-var notifications = []Notification{
-	{
-		ID:          1,
-		RoomID:      1,
-		BorrowDate:  "2024-10-12",
-		StartTime:   "14:00",
-		EndTime:     "16:00",
-		Status:      "diterima",
-		File:        "contract1.pdf",
-		Description: "Peminjaman untuk seminar teknologi",
-	},
-	{
-		ID:          2,
-		RoomID:      2,
-		BorrowDate:  "2024-10-13",
-		StartTime:   "12	:00",
-		EndTime:     "16:00",
-		Status:      "diterima",
-		File:        "",
-		Description: "Penggunaan ruangan untuk pertemuan organisasi",
-	},
-}
+var notifications = []Notification{}
 
 var jwtSecretKey = []byte(os.Getenv("JWT_SECRET"))
 
-var users = map[string]string{
-	"admin": "password123",
-	"user":  "password456",
+var users = []LoginInput{
+	{Username: "admin", Password: "password123", Role: "admin"},
+	{Username: "user", Password: "password123", Role: "user"},
 }
 
 // The main handler for Vercel (serverless)
@@ -261,6 +246,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	// Routes
 	router.POST("/login", LoginHandler)
+	router.GET("/users", GetUsersHandler)
+	router.POST("/logout", LogoutHandler)
+
+	// Group routes yang membutuhkan autentikasi
 	auth := router.Group("/")
 	auth.Use(JWTAuthMiddleware()) // Gunakan middleware JWT setelah CORS
 	auth.GET("/rooms", getRooms)
@@ -271,11 +260,50 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	auth.POST("/notifications", addNotification)
 	auth.GET("/notifications", getNotifications)
 	auth.GET("/notifications-with-name", GetNotificationsWithRoomName)
-
-	router.POST("/logout", LogoutHandler)
+	auth.POST("/update-status", updateStatusHandler)
 
 	// Run Gin router to handle the request
 	router.ServeHTTP(w, r)
+}
+
+func updateStatusHandler(c *gin.Context) {
+	var req UpdateStatusRequest
+
+	// Bind input JSON ke struct
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload"})
+		return
+	}
+
+	// Validasi status baru
+	if req.Status != "Diterima" && req.Status != "Ditolak" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Status harus 'Diterima' atau 'Ditolak'"})
+		return
+	}
+
+	// Cari notifikasi berdasarkan ID
+	for i, notification := range notifications {
+		if notification.ID == req.ID {
+			// Perbarui status
+			notifications[i].Status = req.Status
+
+			// Kirim respons sukses
+			c.JSON(http.StatusOK, gin.H{
+				"message": "Status berhasil diperbarui",
+			})
+			return
+		}
+	}
+
+	// Jika ID tidak ditemukan
+	c.JSON(http.StatusNotFound, gin.H{"error": "Notification not found"})
+}
+
+func GetUsersHandler(c *gin.Context) {
+	// Menampilkan semua data pengguna
+	c.JSON(http.StatusOK, gin.H{
+		"users": users,
+	})
 }
 
 // LogoutHandler handles logout requests and removes the JWT cookie
@@ -335,8 +363,6 @@ func GenerateJWT(username string) (string, error) {
 }
 
 // LoginHandler handles login requests
-// LoginHandler handles login requests and sets JWT in a cookie
-// LoginHandler handles login requests and sets JWT in a cookie
 func LoginHandler(c *gin.Context) {
 	var input LoginInput
 	if err := c.ShouldBindJSON(&input); err != nil {
@@ -344,8 +370,17 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	// Validate credentials
-	if password, ok := users[input.Username]; !ok || password != input.Password {
+	// Cari user dalam slice users
+	var foundUser *LoginInput
+	for _, user := range users {
+		if user.Username == input.Username {
+			foundUser = &user
+			break
+		}
+	}
+
+	// Jika user tidak ditemukan atau password tidak cocok
+	if foundUser == nil || foundUser.Password != input.Password {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid username or password"})
 		return
 	}
@@ -360,10 +395,11 @@ func LoginHandler(c *gin.Context) {
 	// Set JWT as a cookie
 	c.SetCookie("Authorization", token, 3600, "/", "", true, false) // SameSite=None, Secure=false (untuk localhost)
 
-	// Return response with username and user_id (assuming user_id is their username for now)
+	// Return response with username and role
 	c.JSON(http.StatusOK, gin.H{
 		"message":  "Login successful",
 		"username": input.Username,
+		"role":     foundUser.Role,
 		"token":    token,
 	})
 }
