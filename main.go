@@ -527,7 +527,7 @@ func addNotification(c *gin.Context) {
 	// Proses file jika ada
 	file, _, err := c.Request.FormFile("file")
 	if err != nil {
-		newNotification.File = ""
+		newNotification.File = "sementara.pdf"
 	} else {
 		defer file.Close()
 		// Simpan file dan tentukan path file
